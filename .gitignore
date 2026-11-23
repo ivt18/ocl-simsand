@@ -1,0 +1,11 @@
+# Build output (CMake build directories, including FetchContent downloads)
+build/
+out/
+cmake-build-*/
+
+# IDE / editor state
+.vs/
+.vscode/
+.idea/
+*.user
+CMakeUserPresets.json

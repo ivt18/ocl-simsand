@@ -1,0 +1,5 @@
+# Normalise line endings in the repository; check out with the platform's native endings.
+* text=auto
+
+# Shell scripts must keep LF endings, or bash fails on the carriage returns.
+*.sh text eol=lf
