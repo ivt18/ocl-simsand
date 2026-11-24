@@ -25,7 +25,15 @@ CMake downloads these automatically the first time you configure:
 
 ## Building and running
 
-From Git Bash:
+From cmd or PowerShell (the configuration defaults to Debug):
+
+```bat
+.\windows_build.bat
+.\windows_build.bat Release
+.\build\Debug\ocl-simsand.exe
+```
+
+Or from Git Bash:
 
 ```sh
 ./windows_build.sh            # Debug
@@ -50,6 +58,7 @@ prints the compiler's error log and exits.
 
 ```
 CMakeLists.txt        Build: dependencies and sources
+windows_build.bat     Build script for cmd/PowerShell on Windows
 windows_build.sh      Build script for Git Bash on Windows
 kernels/
   simulate.cl         OpenCL kernels: step (the simulation) and colorize (cells → pixels)

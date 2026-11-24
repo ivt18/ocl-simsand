@@ -3,3 +3,5 @@
 
 # Shell scripts must keep LF endings, or bash fails on the carriage returns.
 *.sh text eol=lf
+# Batch files need CRLF endings; cmd misparses some LF-only scripts.
+*.bat text eol=crlf

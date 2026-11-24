@@ -1,9 +1,27 @@
 #include "shared.h"
 
+// Claim cell i for this simulation step. Each cell can be accessed by at most one caller per
+// simulation step. Returns true if the cell was claimed successfully, false otherwise
+bool claim(volatile __global uint* claimed, int i)
+{
+    return atomic_cmpxchg(&claimed[i], 0u, 1u) == 0u;
+}
+
+// Cheap per-cell and per-frame hash function
+uint hash(uint x, uint y, uint frame)
+{
+    uint h = (x * 0x8da6b343u) ^ (y * 0xd8163841u) ^ (frame * 0xcb1ab31fu);
+    h ^= h >> 16;
+    h *= 0x7feb352du;
+    h ^= h >> 15;
+    return h;
+}
+
 // One simulation step, one work-item per cell.
 // Ping-pong: reads the current state from `in` and writes the next state to `out`.
 // The host swaps the two buffers after every step.
-__kernel void step(__global const uint* in, __global uint* out, int width, int height)
+__kernel void step(__global const uint* in, __global uint* out,
+                    volatile __global uint* claimed, int width, int height, uint frame)
 {
     // The global size is rounded up to whole work-groups, so some work-items fall
     // outside the grid. They have no cell; exit before reading or writing out of bounds.
@@ -13,11 +31,39 @@ __kernel void step(__global const uint* in, __global uint* out, int width, int h
         return;
     }
     int i = y * width + x;
+    int below_i = i + width;
+    int target_sand = -1;
 
-    // PLACEHOLDER: copies the state unchanged. Replace with the sand rules.
-    // Every in-bounds cell of `out` must be written on every step; any cell that
-    // isn't keeps its value from two steps ago.
-    out[i] = in[i];
+    if (in[i] != MAT_SAND || (in[i] == MAT_SAND && y + 1 >= height)) {
+        return;
+    }
+
+    // Material rules (only moving materials)
+    // Out is initialized as a copy of in, so that static particles stay in place
+    switch (in[i]) {
+        // Sand moves straight down if possible. Otherwise, diagonally down
+        case MAT_SAND: {
+            int dir = (hash(x, y, frame) & 1) ? 1 : -1; // Which diagonal to try first
+            if (in[below_i] == MAT_EMPTY && claim(claimed, below_i)) {
+                target_sand = below_i;
+            } else if (x + dir >= 0 && x + dir < width
+                && in[below_i + dir] == MAT_EMPTY && claim(claimed, below_i + dir)) {
+                target_sand = below_i + dir;
+            } else if (x - dir >= 0 && x - dir < width
+                && in[below_i - dir] == MAT_EMPTY && claim(claimed, below_i - dir)) {
+                target_sand = below_i - dir;
+            }
+            
+            if (target_sand >= 0) {
+                out[target_sand] = in[i];
+                out[i] = MAT_EMPTY;
+            }
+            break;
+        }
+
+        default:
+            break;
+    }
 }
 
 // Material colours (RGBA, sRGB, 0..1), indexed by material ID (MAT_* in shared.h).

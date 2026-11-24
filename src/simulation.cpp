@@ -6,7 +6,9 @@
 
 namespace {
 
-size_t roundUp(size_t value, size_t multiple) { return (value + multiple - 1) / multiple * multiple; }
+size_t roundUp(size_t value, size_t multiple) {
+    return (value + multiple - 1) / multiple * multiple;
+}
 
 } // namespace
 
@@ -17,12 +19,13 @@ Simulation::Simulation(const ClSetup& cl, int width, int height, const std::stri
       program_(buildProgram(cl, kernelDir + "/simulate.cl", "-I " + kernelDir)),
       step_(program_, "step"),
       colorize_(program_, "colorize") {
-    const size_t bytes = size_t(width_) * height_ * sizeof(cl_uint);
+    const size_t gridBytes = size_t(width_) * height_ * sizeof(cl_uint);
     for (cl::Buffer& buffer : cells_) {
-        buffer = cl::Buffer(cl.context, CL_MEM_READ_WRITE, bytes);
-        queue_.enqueueFillBuffer(buffer, MAT_EMPTY, 0, bytes);  // contents start out undefined
+        buffer = cl::Buffer(cl.context, CL_MEM_READ_WRITE, gridBytes);
+        queue_.enqueueFillBuffer(buffer, MAT_EMPTY, 0, gridBytes);  // contents start out undefined
     }
-    pixels_ = cl::Buffer(cl.context, CL_MEM_WRITE_ONLY, bytes);
+    pixels_ = cl::Buffer(cl.context, CL_MEM_WRITE_ONLY, gridBytes);
+    claimed_ = cl::Buffer(cl.context, CL_MEM_READ_WRITE, gridBytes);
 
     // Like a CUDA launch: global = total work-items (rounded up), local = work-group (block) size.
     global_ = cl::NDRange(roundUp(width_, WORKGROUP_SIZE), roundUp(height_, WORKGROUP_SIZE));
@@ -37,9 +40,14 @@ void Simulation::upload(const std::vector<cl_uint>& cells) {
 }
 
 void Simulation::step() {
-    // ≈ step<<<global / local, local>>>(in, out, width, height)
-    step_(cl::EnqueueArgs(queue_, global_, local_), cells_[current_], cells_[1 - current_], width_, height_);
+    // ≈ step<<<global / local, local>>>(in, out, claimed, width, height)
+    const size_t gridBytes = size_t(width_) * size_t(height_) * sizeof(cl_uint);
+    queue_.enqueueCopyBuffer(cells_[current_], cells_[1 - current_], 0, 0, gridBytes);  // out = in
+    queue_.enqueueFillBuffer(claimed_, cl_uint(0), 0, gridBytes);   // clear claimed buffer
+    step_(cl::EnqueueArgs(queue_, global_, local_),
+            cells_[current_], cells_[1 - current_], claimed_, width_, height_, frame_);
     current_ ^= 1;
+    frame_++;
 }
 
 void Simulation::readPixels(std::vector<uint32_t>& pixels) {

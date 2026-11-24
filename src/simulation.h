@@ -28,14 +28,16 @@ private:
     cl::CommandQueue queue_;  // handle copy: cheap, reference-counted
     int width_;
     int height_;
+    cl_uint frame_ = 0;
 
     cl::Program program_;
-    cl::KernelFunctor<cl::Buffer, cl::Buffer, int, int> step_;      // step(in, out, width, height)
+    cl::KernelFunctor<cl::Buffer, cl::Buffer, cl::Buffer, int, int, cl_uint> step_;      // step(in, out, claimed, width, height, frame)
     cl::KernelFunctor<cl::Buffer, cl::Buffer, int, int> colorize_;  // colorize(cells, pixels, width, height)
 
     cl::Buffer cells_[2];  // ping-pong pair
     int current_ = 0;      // index of the buffer holding the current state
     cl::Buffer pixels_;
+    cl::Buffer claimed_;
 
     cl::NDRange global_;  // grid size rounded up to whole work-groups
     cl::NDRange local_;   // work-group size
