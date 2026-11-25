@@ -17,52 +17,81 @@ uint hash(uint x, uint y, uint frame)
     return h;
 }
 
-// One simulation step, one work-item per cell.
-// Ping-pong: reads the current state from `in` and writes the next state to `out`.
-// The host swaps the two buffers after every step.
-__kernel void step(__global const uint* in, __global uint* out,
-                    volatile __global uint* claimed, int width, int height, uint frame)
+// Try the two cells diagonally below cell i, in a random order. Returns the target, or -1
+int diagonalTarget(__global const uint* in, volatile __global uint* claimed,
+                    int x, int y, int i, int width, uint frame)
 {
-    // The global size is rounded up to whole work-groups, so some work-items fall
-    // outside the grid. They have no cell; exit before reading or writing out of bounds.
+    int below_i = i + width;
+    int dir = (hash(x, y, frame) & 1) ? 1 : -1;
+    if (x + dir >= 0 && x + dir < width && in[below_i + dir] == MAT_EMPTY && claim(claimed, below_i + dir)) {
+        return below_i + dir;
+    }
+    if (x - dir >= 0 && x - dir < width && in[below_i - dir] == MAT_EMPTY && claim(claimed, below_i - dir)) {
+        return below_i - dir;
+    }
+    return -1;
+}
+
+// Simulation step for just the grains of sand that have empty space below
+__kernel void step_sand_bottoms(__global const uint* in, __global uint* out,
+                                volatile __global uint* claimed, __global uchar* moved,
+                                int width, int height, uint frame)
+{
     int x = get_global_id(0);
     int y = get_global_id(1);
-    if (x >= width || y >= height) {
+    if (x >= width || y + 1 >= height)
         return;
-    }
     int i = y * width + x;
     int below_i = i + width;
     int target_sand = -1;
-
-    if (in[i] != MAT_SAND || (in[i] == MAT_SAND && y + 1 >= height)) {
+    
+    if (in[i] != MAT_SAND || in[below_i] == MAT_SAND)
         return;
+
+    // Sand moves straight down if possible. Otherwise, diagonally down
+    if (in[below_i] == MAT_EMPTY && claim(claimed, below_i)) {
+        target_sand = below_i;
+    } else {
+        target_sand = diagonalTarget(in, claimed, x, y, i, width, frame);
     }
 
-    // Material rules (only moving materials)
-    // Out is initialized as a copy of in, so that static particles stay in place
-    switch (in[i]) {
-        // Sand moves straight down if possible. Otherwise, diagonally down
-        case MAT_SAND: {
-            int dir = (hash(x, y, frame) & 1) ? 1 : -1; // Which diagonal to try first
-            if (in[below_i] == MAT_EMPTY && claim(claimed, below_i)) {
-                target_sand = below_i;
-            } else if (x + dir >= 0 && x + dir < width
-                && in[below_i + dir] == MAT_EMPTY && claim(claimed, below_i + dir)) {
-                target_sand = below_i + dir;
-            } else if (x - dir >= 0 && x - dir < width
-                && in[below_i - dir] == MAT_EMPTY && claim(claimed, below_i - dir)) {
-                target_sand = below_i - dir;
-            }
-            
-            if (target_sand >= 0) {
-                out[target_sand] = in[i];
-                out[i] = MAT_EMPTY;
-            }
-            break;
-        }
+    if (target_sand >= 0) {
+        out[target_sand] = in[i];
+        out[i] = MAT_EMPTY;
+        moved[i] = 1;
+    }
+}
 
-        default:
-            break;
+__kernel void step_sand_inner(__global const uint* in, __global uint* out,
+                              volatile __global uint* claimed, __global uchar* moved,
+                              int width, int height, uint frame)
+{
+    int x = get_global_id(0);
+    int y = get_global_id(1);
+    if (x >= width || y + 1 >= height)
+        return;
+    int i = y * width + x;
+    int below_i = i + width;
+
+    if (in[i] != MAT_SAND || in[below_i] != MAT_SAND)
+        return;
+
+    // Walk down to the bottom grain of this column of sand
+    int bottom = below_i;
+    while (bottom + width < width * height && in[bottom + width] == MAT_SAND) {
+        bottom += width;
+    }
+
+    if (moved[bottom]) {
+        out[below_i] = MAT_SAND;        // Every grain of sand moves down one cell
+        if (y == 0 || in[i - width] != MAT_SAND)
+            out[i] = MAT_EMPTY;         // The top grain in the column leaves its cell empty
+    } else {
+        int target = diagonalTarget(in, claimed, x, y, i, width, frame);
+        if (target >= 0) {
+            out[target] = in[i];
+            out[i] = MAT_EMPTY;
+        }
     }
 }
 

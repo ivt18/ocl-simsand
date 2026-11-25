@@ -17,7 +17,8 @@ Simulation::Simulation(const ClSetup& cl, int width, int height, const std::stri
       width_(width),
       height_(height),
       program_(buildProgram(cl, kernelDir + "/simulate.cl", "-I " + kernelDir)),
-      step_(program_, "step"),
+      stepSandBottoms_(program_, "step_sand_bottoms"),
+      stepSandInner_(program_, "step_sand_inner"),
       colorize_(program_, "colorize") {
     const size_t gridBytes = size_t(width_) * height_ * sizeof(cl_uint);
     for (cl::Buffer& buffer : cells_) {
@@ -26,6 +27,10 @@ Simulation::Simulation(const ClSetup& cl, int width, int height, const std::stri
     }
     pixels_ = cl::Buffer(cl.context, CL_MEM_WRITE_ONLY, gridBytes);
     claimed_ = cl::Buffer(cl.context, CL_MEM_READ_WRITE, gridBytes);
+
+    const size_t movedBytes = size_t(width_) * height_ * sizeof(cl_uchar);
+    moved_ = cl::Buffer(cl.context, CL_MEM_READ_WRITE, movedBytes);
+    queue_.enqueueFillBuffer(moved_, cl_uchar(0), 0, movedBytes);  // contents start out undefined
 
     // Like a CUDA launch: global = total work-items (rounded up), local = work-group (block) size.
     global_ = cl::NDRange(roundUp(width_, WORKGROUP_SIZE), roundUp(height_, WORKGROUP_SIZE));
@@ -40,12 +45,15 @@ void Simulation::upload(const std::vector<cl_uint>& cells) {
 }
 
 void Simulation::step() {
-    // ≈ step<<<global / local, local>>>(in, out, claimed, width, height)
     const size_t gridBytes = size_t(width_) * size_t(height_) * sizeof(cl_uint);
+    const size_t movedBytes = size_t(width_) * height_ * sizeof(cl_uchar);
     queue_.enqueueCopyBuffer(cells_[current_], cells_[1 - current_], 0, 0, gridBytes);  // out = in
     queue_.enqueueFillBuffer(claimed_, cl_uint(0), 0, gridBytes);   // clear claimed buffer
-    step_(cl::EnqueueArgs(queue_, global_, local_),
-            cells_[current_], cells_[1 - current_], claimed_, width_, height_, frame_);
+    queue_.enqueueFillBuffer(moved_, cl_uchar(0), 0, movedBytes);   // clear moved buffer
+    stepSandBottoms_(cl::EnqueueArgs(queue_, global_, local_),
+            cells_[current_], cells_[1 - current_], claimed_, moved_, width_, height_, frame_);
+    stepSandInner_(cl::EnqueueArgs(queue_, global_, local_),
+            cells_[current_], cells_[1 - current_], claimed_, moved_, width_, height_, frame_);
     current_ ^= 1;
     frame_++;
 }
