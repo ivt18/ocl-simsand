@@ -302,6 +302,27 @@ __kernel void apply_impulses(__global const uint* in, __global uint* out,
         return;
 }
 
+// Brush: puts 'material' into empty cells within 'radius' cells of (cx, cy). Each empty cell in
+// the brush is filled with a chance of density / 256, so holding the brush still sprinkles grains
+// instead of stamping a solid disc. Cells that aren't empty (sand, stone) are left as they are.
+__kernel void paint(__global uint* cells, int width, int height, int cx, int cy, int radius,
+                    uint material, uint density, uint frame)
+{
+    int2 pos = (int2)((int)get_global_id(0), (int)get_global_id(1));
+    if (!isInGrid(pos, width, height))
+        return;
+
+    int2 d = pos - (int2)(cx, cy);
+    if (d.x * d.x + d.y * d.y > radius * radius)
+        return;
+
+    int i = pos.y * width + pos.x;
+    // Different seed from the step kernels, so the brush pattern doesn't line up with their random choices
+    uint h = hash((uint)pos.x, (uint)pos.y, frame ^ 0x9e3779b9u);
+    if (getCellMaterial(cells[i]) == MAT_EMPTY && (h & 0xFFu) < density)
+        cells[i] = material;  // velocity 0, fraction 0
+}
+
 // Material colours (RGBA, sRGB, 0..1), indexed by material ID (MAT_* in shared.h).
 // float4 rather than float3: arrays of float3 are laid out inconsistently between
 // compilers (NVIDIA packs them at 12 bytes but indexes at 16), which scrambles the colours.

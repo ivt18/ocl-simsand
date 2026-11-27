@@ -4,6 +4,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
@@ -19,6 +20,11 @@ constexpr int kGridWidth = 640;
 constexpr int kGridHeight = 360;
 constexpr int kWindowWidth = 1280;
 constexpr int kWindowHeight = 720;
+
+// Brush for adding sand with the left mouse button. The mouse wheel changes the radius.
+constexpr int kBrushRadiusStart = 4;
+constexpr int kBrushRadiusMax = 64;
+constexpr float kBrushDensity = 0.25f;  // chance per frame that each empty cell in the brush gets a grain
 
 // PLACEHOLDER: a starting scene so there is something on screen: a stone floor and a block of sand.
 std::vector<cl_uint> makeTestScene(int width, int height) {
@@ -67,6 +73,12 @@ void run() {
     sim.upload(makeTestScene(kGridWidth, kGridHeight));
 
     std::vector<uint32_t> pixels;
+
+    // Brush state. Mouse positions are in grid cells (see SDL_ConvertEventToRenderCoordinates below).
+    bool painting = false;
+    float mouseX = 0.0f;
+    float mouseY = 0.0f;
+    int brushRadius = kBrushRadiusStart;
     uint64_t titleTime = SDL_GetTicks();
     int framesSinceTitle = 0;
 
@@ -74,20 +86,37 @@ void run() {
     while (running) {
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
-            // Tip: SDL_ConvertEventToRenderCoordinates(renderer, &event) turns mouse positions
-            // into cell coordinates, because of the logical presentation set above.
+            // Turns mouse positions into cell coordinates, because of the logical presentation set above.
+            SDL_ConvertEventToRenderCoordinates(renderer, &event);
             if (event.type == SDL_EVENT_QUIT) {
                 running = false;
             } else if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_ESCAPE) {
                 running = false;
+            } else if (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN && event.button.button == SDL_BUTTON_LEFT) {
+                painting = true;
+                mouseX = event.button.x;
+                mouseY = event.button.y;
+            } else if (event.type == SDL_EVENT_MOUSE_BUTTON_UP && event.button.button == SDL_BUTTON_LEFT) {
+                painting = false;
+            } else if (event.type == SDL_EVENT_MOUSE_MOTION) {
+                mouseX = event.motion.x;
+                mouseY = event.motion.y;
+            } else if (event.type == SDL_EVENT_MOUSE_WHEEL && event.wheel.y != 0.0f) {
+                brushRadius += event.wheel.y > 0.0f ? 1 : -1;
+                brushRadius = std::clamp(brushRadius, 0, kBrushRadiusMax);
             }
         }
 
-        // 1. Simulate on the GPU, then fetch the image.
+        // 1. Add sand while the left button is held (every frame, so holding still keeps pouring).
+        if (painting) {
+            sim.paint(int(SDL_floorf(mouseX)), int(SDL_floorf(mouseY)), brushRadius, MAT_SAND, kBrushDensity);
+        }
+
+        // 2. Simulate on the GPU, then fetch the image.
         sim.step();
         sim.readPixels(pixels);
 
-        // 2. Show it.
+        // 3. Show it.
         SDL_UpdateTexture(texture, nullptr, pixels.data(), kGridWidth * int(sizeof(uint32_t)));
         SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         SDL_RenderClear(renderer);

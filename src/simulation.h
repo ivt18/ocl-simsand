@@ -21,6 +21,11 @@ public:
     // Runs one step: reads the current buffer, writes the other one, then swaps them.
     void step();
 
+    // Puts `material` into empty cells within `radius` cells of (x, y), in grid coordinates.
+    // `density` (0..1) is the chance that each empty cell in the brush is filled.
+    // (x, y) may lie outside the grid; only the part of the brush inside it is painted.
+    void paint(int x, int y, int radius, cl_uint material, float density);
+
     // Converts the current state to RGBA8 pixels (one per cell) and copies them into `pixels`.
     void readPixels(std::vector<uint32_t>& pixels);
 
@@ -41,6 +46,8 @@ private:
     // apply_impulses(in, out, dest, hitGrain, hitNormal, impulse, width, height)
     cl::KernelFunctor<cl::Buffer, cl::Buffer, cl::Buffer, cl::Buffer, cl::Buffer, cl::Buffer, int, int>
         applyImpulses_;
+    // paint(cells, width, height, cx, cy, radius, material, density, frame)
+    cl::KernelFunctor<cl::Buffer, int, int, int, int, int, cl_uint, cl_uint, cl_uint> paint_;
     cl::KernelFunctor<cl::Buffer, cl::Buffer, int, int> colorize_;  // colorize(cells, pixels, width, height)
 
     cl::Buffer cells_[2];  // ping-pong pair

@@ -2,6 +2,7 @@
 
 #include "shared.h"
 
+#include <algorithm>
 #include <stdexcept>
 
 namespace {
@@ -21,6 +22,7 @@ Simulation::Simulation(const ClSetup& cl, int width, int height, const std::stri
       stepSandInner_(program_, "step_sand_inner"),
       collide_(program_, "collide"),
       applyImpulses_(program_, "apply_impulses"),
+      paint_(program_, "paint"),
       colorize_(program_, "colorize") {
     const size_t gridBytes = size_t(width_) * height_ * sizeof(cl_uint);
     for (cl::Buffer& buffer : cells_) {
@@ -77,6 +79,13 @@ void Simulation::step() {
             cells_[current_], cells_[1 - current_], dest_, hitGrain_, hitNormal_, impulse_, width_, height_);
     current_ ^= 1;
     frame_++;
+}
+
+void Simulation::paint(int x, int y, int radius, cl_uint material, float density) {
+    // The kernel compares against an 8-bit random number, so 256 means "always"
+    const cl_uint threshold = cl_uint(std::clamp(density, 0.0f, 1.0f) * 256.0f);
+    paint_(cl::EnqueueArgs(queue_, global_, local_),
+           cells_[current_], width_, height_, x, y, radius, material, threshold, frame_);
 }
 
 void Simulation::readPixels(std::vector<uint32_t>& pixels) {
