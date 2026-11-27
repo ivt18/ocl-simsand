@@ -31,10 +31,16 @@ private:
     cl_uint frame_ = 0;
 
     cl::Program program_;
-    // All step kernels take (in, out, claimed, moved, width, height, frame).
-    using StepKernel = cl::KernelFunctor<cl::Buffer, cl::Buffer, cl::Buffer, cl::Buffer, int, int, cl_uint>;
+    // All step kernels take (in, out, claimed, moved, hitGrain, hitNormal, dest, width, height, frame).
+    using StepKernel = cl::KernelFunctor<cl::Buffer, cl::Buffer, cl::Buffer, cl::Buffer,
+                                         cl::Buffer, cl::Buffer, cl::Buffer, int, int, cl_uint>;
     StepKernel stepSandBottoms_;  // step_sand_bottoms
     StepKernel stepSandInner_;    // step_sand_inner
+    // collide(in, hitGrain, hitNormal, dest, impulse, width, height)
+    cl::KernelFunctor<cl::Buffer, cl::Buffer, cl::Buffer, cl::Buffer, cl::Buffer, int, int> collide_;
+    // apply_impulses(in, out, dest, hitGrain, hitNormal, impulse, width, height)
+    cl::KernelFunctor<cl::Buffer, cl::Buffer, cl::Buffer, cl::Buffer, cl::Buffer, cl::Buffer, int, int>
+        applyImpulses_;
     cl::KernelFunctor<cl::Buffer, cl::Buffer, int, int> colorize_;  // colorize(cells, pixels, width, height)
 
     cl::Buffer cells_[2];  // ping-pong pair
@@ -42,6 +48,11 @@ private:
     cl::Buffer pixels_;
     cl::Buffer claimed_;
     cl::Buffer moved_;  // one cl_uchar per cell; zeroed once at startup and cleared at every step
+    // Collision buffers, all indexed by a grain's start-of-step index:
+    cl::Buffer hitGrain_;   // one cl_int per cell: index of the grain this one hit (-1 = none); cleared to -1 every step
+    cl::Buffer hitNormal_;  // one cl_char2 per cell: the blocked step; only valid where hitGrain >= 0
+    cl::Buffer dest_;       // one cl_int per cell: index of the cell the grain ended up in; every grain writes it
+    cl::Buffer impulse_;    // two cl_ints per cell (x, y): summed velocity changes; cleared every step
 
     cl::NDRange global_;  // grid size rounded up to whole work-groups
     cl::NDRange local_;   // work-group size
