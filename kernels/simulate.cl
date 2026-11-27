@@ -346,6 +346,13 @@ __kernel void colorize(__global const uint* cells, __global uint* pixels, int wi
     uint material = getCellMaterial(cells[i]);
     float3 color = material < MATERIAL_COUNT ? MATERIAL_COLORS[material].xyz
                                              : (float3)(1.0f, 0.0f, 1.0f);  // magenta = unknown ID
+                                            
+    // Add some randomness to the color
+    if (material != MAT_EMPTY) {
+        uint h = hash((uint)x, (uint)y, material);
+        float3 noise = convert_float3((uint3)(h, h >> 8, h >> 16) & 0xFFu) / 255.0f - 0.5f;  // -0.5..0.5 per channel
+        color += noise * SHIMMER_AMOUNT;
+    }
 
     // Byte order R, G, B, A in memory (SDL_PIXELFORMAT_RGBA32), so R is the lowest byte.
     uint3 rgb = convert_uint3_sat_rte(color * 255.0f);
