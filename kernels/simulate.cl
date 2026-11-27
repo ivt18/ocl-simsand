@@ -136,9 +136,10 @@ int diagonalTarget(__global const uint* in, volatile __global uint* claimed,
     return -1;
 }
 
-// Simulation step for just the grains of sand that have empty space below
+// Simulation step for just the grains of sand that don't have another grain directly below them
+// (the bottom grains of each column). The grains above them are handled by step_sand_inner.
 __kernel void step_sand_bottoms(__global const uint* in, __global uint* out,
-                                volatile __global uint* claimed, __global uchar* moved,
+                                volatile __global uint* claimed,
                                 __global int* hitGrain, __global char2* hitNormal,
                                 __global int* dest, int width, int height, uint frame)
 {
@@ -149,6 +150,8 @@ __kernel void step_sand_bottoms(__global const uint* in, __global uint* out,
     int i = pos.y * width + pos.x;
     if (getCellMaterial(in[i]) != MAT_SAND)
         return;
+    if (pos.y + 1 < height && getCellMaterial(in[i + width]) == MAT_SAND)
+        return;  // resting on another grain: step_sand_inner moves it
 
     int2 velocity = clampCellVelocity(getCellVelocity(in[i]) + (int2)(0, GRAVITY));
     int2 tmpMovement = getCellFractionalMovement(in[i]) + velocity + 128;
@@ -182,9 +185,9 @@ __kernel void step_sand_bottoms(__global const uint* in, __global uint* out,
 
                 case MAT_SAND:
                     // Another grain of sand at its start-of-step position (it may have moved away since)
-                    // hitGrain[i] = hitIndex;
-                    // hitNormal[i] = convert_char2(targetPath.blockedStep);
-                    // break;
+                    hitGrain[i] = hitIndex;
+                    hitNormal[i] = convert_char2(targetPath.blockedStep);
+                    break;
 
                 default:
                     // Stone or any other material that doesn't move
@@ -218,36 +221,60 @@ __kernel void step_sand_bottoms(__global const uint* in, __global uint* out,
     }
 }
 
+// Simulation step for the grains of sand that have another grain directly below them.
+// Runs after step_sand_bottoms, so the bottom grain of every column has already moved and
+// dest[bottom] says where it went. If it fell straight down, the whole column follows it as one
+// body. Otherwise the grain rests on the grain below it, or slides diagonally down.
 __kernel void step_sand_inner(__global const uint* in, __global uint* out,
-                              volatile __global uint* claimed, __global uchar* moved,
+                              volatile __global uint* claimed,
                               __global int* hitGrain, __global char2* hitNormal,
                               __global int* dest, int width, int height, uint frame)
 {
-    int x = get_global_id(0);
-    int y = get_global_id(1);
-    if (x >= width || y + 1 >= height)
+    int2 pos = (int2)((int)get_global_id(0), (int)get_global_id(1));
+    if (!isInGrid(pos, width, height) || pos.y + 1 >= height)
         return;
-    int i = y * width + x;
+    int i = pos.y * width + pos.x;
     int below_i = i + width;
 
-    if (in[i] != MAT_SAND || in[below_i] != MAT_SAND)
+    if (getCellMaterial(in[i]) != MAT_SAND || getCellMaterial(in[below_i]) != MAT_SAND)
         return;
 
     // Walk down to the bottom grain of this column of sand
     int bottom = below_i;
-    while (bottom + width < width * height && in[bottom + width] == MAT_SAND) {
+    while (bottom + width < width * height && getCellMaterial(in[bottom + width]) == MAT_SAND) {
         bottom += width;
     }
 
-    if (moved[bottom]) {
-        out[below_i] = MAT_SAND;        // Every grain of sand moves down one cell
-        if (y == 0 || in[i - width] != MAT_SAND)
-            out[i] = MAT_EMPTY;         // The top grain in the column leaves its cell empty
-    } else {
-        int target = diagonalTarget(in, claimed, x, y, i, width, height, frame);
-        if (target >= 0) {
-            out[target] = in[i];
+    int shift = dest[bottom] - bottom;  // how far the bottom grain moved, as an index offset
+    if (shift > 0 && shift % width == 0) {
+        // The bottom grain fell straight down by k cells: every grain of the column moves down
+        // k cells too. The cells it moves into are either cells of the column itself or cells on the
+        // bottom grain's path, which the bottom grain claimed, so no other grain can be there.
+        int k = shift / width;
+        int target = i + shift;
+        out[target] = out[dest[bottom]];  // same velocity and fraction as the bottom grain
+        dest[i] = target;
+
+        // The top k grains in the column leave their cell empty. Every other grain's cell is
+        // filled by the grain k cells above it, so it must not write MAT_EMPTY there.
+        bool filledFromAbove = pos.y - k >= 0;
+        for (int j = 1; j <= k && filledFromAbove; j++) {
+            filledFromAbove = getCellMaterial(in[i - j * width]) == MAT_SAND;
+        }
+        if (!filledFromAbove)
             out[i] = MAT_EMPTY;
+    } else {
+        // The bottom grain didn't fall straight down, so this grain rests on the grain below it.
+        // Resting grains have no velocity; they start falling from rest once the support is gone.
+        uint resting = makeCell(MAT_SAND, (int2)(0, 0), (int2)(0, 0));
+        int target = diagonalTarget(in, claimed, pos.x, pos.y, i, width, height, frame);
+        if (target >= 0) {
+            out[target] = resting;
+            out[i] = MAT_EMPTY;
+            dest[i] = target;
+        } else {
+            out[i] = resting;
+            dest[i] = i;
         }
     }
 }

@@ -31,8 +31,8 @@ private:
     cl_uint frame_ = 0;
 
     cl::Program program_;
-    // All step kernels take (in, out, claimed, moved, hitGrain, hitNormal, dest, width, height, frame).
-    using StepKernel = cl::KernelFunctor<cl::Buffer, cl::Buffer, cl::Buffer, cl::Buffer,
+    // All step kernels take (in, out, claimed, hitGrain, hitNormal, dest, width, height, frame).
+    using StepKernel = cl::KernelFunctor<cl::Buffer, cl::Buffer, cl::Buffer,
                                          cl::Buffer, cl::Buffer, cl::Buffer, int, int, cl_uint>;
     StepKernel stepSandBottoms_;  // step_sand_bottoms
     StepKernel stepSandInner_;    // step_sand_inner
@@ -47,7 +47,6 @@ private:
     int current_ = 0;      // index of the buffer holding the current state
     cl::Buffer pixels_;
     cl::Buffer claimed_;
-    cl::Buffer moved_;  // one cl_uchar per cell; zeroed once at startup and cleared at every step
     // Collision buffers, all indexed by a grain's start-of-step index:
     cl::Buffer hitGrain_;   // one cl_int per cell: index of the grain this one hit (-1 = none); cleared to -1 every step
     cl::Buffer hitNormal_;  // one cl_char2 per cell: the blocked step; only valid where hitGrain >= 0
